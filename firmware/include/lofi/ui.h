@@ -49,6 +49,7 @@ struct View {
     bool favorite = false;
     bool pending = false;
     bool dimmed = false;
+    bool escHoldWarning = false; // Hold-Escape exit modal is on screen.
     bool sleepTimerActive = false;
     bool sleepExpired = false;
     std::uint32_t sleepSecondsRemaining = 0;

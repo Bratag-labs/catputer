@@ -203,6 +203,37 @@ int main() {
     render(frame, view);
     assert(std::memcmp(before.packed(), frame.packed(), Frame::packedBytes) == 0);
 
+    // The hold-Escape exit warning draws a centered modal over the screen it
+    // appears on: gold border, dark fill, and the warning text.
+    {
+        View modal;
+        modal.motion = 0;
+        modal.escHoldWarning = true;
+        Frame withWarning, plain;
+        render(withWarning, modal);
+        assert(withWarning.get(36, 46) == Gold && withWarning.get(203, 89) == Gold);
+        assert(withWarning.get(120, 48) == Ink);
+        int goldText = 0;
+        for (int y = 56; y <= 62; ++y) {
+            for (int x = 37; x < 203; ++x) {
+                if (withWarning.get(x, y) == Gold) ++goldText;
+            }
+        }
+        assert(goldText > 20);
+        modal.escHoldWarning = false;
+        render(plain, modal);
+        bool differs = false;
+        for (int y = 46; y < 90 && !differs; ++y) {
+            for (int x = 36; x < 204; ++x) {
+                if (plain.get(x, y) != withWarning.get(x, y)) {
+                    differs = true;
+                    break;
+                }
+            }
+        }
+        assert(differs);
+    }
+
     // Every exported screen must contain displayable indices, never the
     // sprite-only transparent sentinel, even at a long-running timestamp.
     for (int mood = 0; mood < 4; ++mood) {

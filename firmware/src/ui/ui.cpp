@@ -630,6 +630,14 @@ void drawDiagnostics(Frame& frame, const View& view) {
     drawText(frame, 34, 108, "ESC BACK", Moon, 178);
 }
 
+// Hold-Escape exit confirmation, drawn over every screen.
+void drawExitWarning(Frame& frame) {
+    frame.fillRect(36, 46, 168, 44, Ink);
+    frame.rect(36, 46, 168, 44, Gold);
+    drawCenteredText(frame, 36, 168, 56, "HOLD ESCAPE TO EXIT", Gold);
+    drawCenteredText(frame, 36, 168, 70, "RELEASE TO CANCEL", Moon);
+}
+
 void drawOverlay(Frame& frame, const View& view) {
     switch (view.screen) {
     case Screen::Moods: drawMenuFrame(frame, "CHOOSE A MOOD", view); break;
@@ -789,6 +797,7 @@ void render(Frame& frame, const View& view) {
             frame.fillRect(4, 4, 68, 12, Ink);
             drawText(frame, 8, 6, view.playing ? "NEXT QUEUED" : "PAUSED", view.pending ? Gold : Cream, 60);
         }
+        if (view.escHoldWarning) drawExitWarning(frame);
         return;
     }
     drawStatus(frame, view, view.screen == Screen::Help ? "HELP" :
@@ -805,6 +814,7 @@ void render(Frame& frame, const View& view) {
              : view.screen == Screen::Instruments
              ? "ENTER CYCLE  ,/ CHANGE  ESC BACK"
              : "ENTER OK   ESC BACK   ;/. MOVE", Cream, 232);
+    if (view.escHoldWarning) drawExitWarning(frame);
 }
 
 } // namespace lofi

@@ -386,7 +386,7 @@ int interactive(const Options& o) {
             if(event.type==SDL_QUIT) running=false;
             if(event.type==SDL_KEYUP) {
                 if(event.key.keysym.sym==wakeKey) wakeKey=SDLK_UNKNOWN;
-                if(event.key.keysym.sym==SDLK_ESCAPE) escDownMs=0;
+                if(event.key.keysym.sym==SDLK_ESCAPE) {escDownMs=0;controller.view.escHoldWarning=false;}
                 if(volRepeat && volumeKey(event.key.keysym)==volRepeat) volRepeat=0;
             }
             if(event.type==SDL_KEYDOWN) {
@@ -406,7 +406,12 @@ int interactive(const Options& o) {
                 if(wasDimmed) wakeKey=event.key.keysym.sym;
             }
         }
-        if(escDownMs && now-escDownMs>=1500) running=false;
+        if(escDownMs) {
+            // The hold-to-exit modal appears 400 ms into the hold; the quit
+            // fires at 1500 ms. Releasing Escape clears the modal.
+            controller.view.escHoldWarning=now-escDownMs>=400;
+            if(now-escDownMs>=1500) running=false;
+        }
         if(volRepeat && now-lastVolRepeat>=130) {action(engine,controller.key(volRepeat));lastVolRepeat=now;}
         if(controller.sleepPausePending()) engine.pause(true);
         gain.setVolume(controller.saved.settings.volume);
