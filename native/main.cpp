@@ -5,11 +5,15 @@
 #include "lofi/state.h"
 #include "lofi/ui.h"
 #include "storage.h"
+#ifdef LOFI_HAS_SDL
+#include "linux_fb.h"
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -30,6 +34,8 @@ struct Options {
     double seconds=90;
     fs::path wav,meta,score,shots,animation,state;
     unsigned frames=48, smokeMs=0, volume=100;
+    enum class Display {Auto,Window,Fb} display=Display::Auto;
+    bool fbFit=true;
     bool noAudio=false, moodExplicit=false, engineExplicit=false, bpmExplicit=false, volumeExplicit=false;
     bool meterExplicit=false, keysExplicit=false, leadExplicit=false, bassExplicit=false;
 };
@@ -79,6 +85,9 @@ Options options(int argc,char** argv) {
         else if(a=="--engine") { o.engineExplicit=true; auto v=value(); if(v=="synth") o.config.soundEngine=SoundEngine::Synth; else if(v=="hybrid") o.config.soundEngine=SoundEngine::Hybrid; else throw std::runtime_error("Engine: synth or hybrid"); }
         else if(a=="--mood") { o.moodExplicit=true; auto v=value(); if(v=="cozy") o.config.mood=Mood::Cozy; else if(v=="rainy") o.config.mood=Mood::Rainy; else if(v=="night") o.config.mood=Mood::Night; else if(v=="sunny") o.config.mood=Mood::Sunny; else throw std::runtime_error("Mood: cozy, rainy, night or sunny"); }
         else if(a=="--no-audio") o.noAudio=true;
+        else if(a=="--fb") o.display=Options::Display::Fb;
+        else if(a=="--window") o.display=Options::Display::Window;
+        else if(a=="--fb-scale") {auto v=value();if(v=="fit") o.fbFit=true;else if(v=="1") o.fbFit=false;else throw std::runtime_error("--fb-scale must be fit or 1");}
         else if(a=="--smoke-ms") {auto n=number(value());if(n<100 || n>60000) throw std::runtime_error("Smoke duration must be 100..60000 ms");o.smokeMs=static_cast<unsigned>(n);}
         else if(a=="--help") {
             std::cout<<"Pocket Lofi native preview\n"
@@ -94,6 +103,10 @@ Options options(int argc,char** argv) {
                 <<"  --state FILE   Optional local settings/favorites\n"
                 <<"  --no-audio     Interactive visual preview only\n"
                 <<"  --smoke-ms N   Exit the SDL preview after a bounded smoke run\n"
+                <<"  --fb / --window  Draw on /dev/fb0 (evdev keyboard, real backlight dimming)\n"
+                <<"                 or in an SDL window. Default: fb when WAYLAND_DISPLAY,\n"
+                <<"                 DISPLAY and SDL_VIDEODRIVER are all unset and /dev/fb0 opens\n"
+                <<"  --fb-scale fit|1  Scale to the panel height (default) or draw 1:1\n"
                 <<"Without export options, launch the SDL preview. Q quits.\n";
             std::exit(0);
         } else throw std::runtime_error("Unknown option: "+a);
@@ -326,16 +339,35 @@ int readBatteryPercent() {
 }
 int interactive(const Options& o) {
 #ifdef LOFI_HAS_SDL
-    if(SDL_Init(SDL_INIT_VIDEO|(o.noAudio?0:SDL_INIT_AUDIO))!=0) throw std::runtime_error(SDL_GetError());
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"0");
-    auto* window=SDL_CreateWindow("Catputer | SPACE play | M moods | S settings | I instruments | E engine | H help | Q quit",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,960,540,SDL_WINDOW_RESIZABLE);
-    if(!window) throw std::runtime_error(SDL_GetError());
-    auto* renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
-    if(!renderer) renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
-    if(!renderer) throw std::runtime_error(SDL_GetError());
-    SDL_RenderSetLogicalSize(renderer,240,135);
-    auto* texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_RGB565,SDL_TEXTUREACCESS_STREAMING,240,135);
-    if(!texture) throw std::runtime_error(SDL_GetError());
+    // Framebuffer mode: see linux_fb.h. Auto mode falls back to a window when
+    // /dev/fb0 cannot be used; --fb makes that an error.
+    lofi_fb::Panel panel;lofi_fb::Keyboard keyboard;lofi_fb::Backlight backlight;
+    bool fb=o.display==Options::Display::Fb ||
+        (o.display==Options::Display::Auto && lofi_fb::autoWanted(std::getenv("WAYLAND_DISPLAY"),std::getenv("DISPLAY"),std::getenv("SDL_VIDEODRIVER")));
+    if(fb) {
+        std::string err;
+        if(!panel.open("/dev/fb0",err)) {
+            if(o.display==Options::Display::Fb) throw std::runtime_error(err);
+            std::cerr<<"[fb] "<<err<<"; using an SDL window\n";fb=false;
+        } else {
+            if(!keyboard.open("tca8418c",err)) std::cerr<<"[fb] "<<err<<"; no keyboard\n";
+            if(!backlight.open(err)) std::cerr<<"[fb] "<<err<<"; auto-dim does not touch the backlight\n";
+        }
+    }
+    if(SDL_Init(SDL_INIT_EVENTS|(fb?0:SDL_INIT_VIDEO)|(o.noAudio?0:SDL_INIT_AUDIO))!=0) throw std::runtime_error(SDL_GetError());
+    SDL_Window* window=nullptr;SDL_Renderer* renderer=nullptr;SDL_Texture* texture=nullptr;
+    if(!fb) {
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"0");
+        window=SDL_CreateWindow("Catputer | SPACE play | M moods | S settings | I instruments | E engine | H help | Q quit",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,960,540,SDL_WINDOW_RESIZABLE);
+        if(!window) throw std::runtime_error(SDL_GetError());
+        renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
+        if(!renderer) renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
+        if(!renderer) throw std::runtime_error(SDL_GetError());
+        SDL_RenderSetLogicalSize(renderer,240,135);
+        texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_RGB565,SDL_TEXTUREACCESS_STREAMING,240,135);
+        if(!texture) throw std::runtime_error(SDL_GetError());
+    }
+    std::vector<lofi_fb::KeyEvent> fbKeys;bool backlightDimmed=false;
     SDL_AudioSpec spec{};spec.freq=kMusicSampleRate;spec.format=AUDIO_S16SYS;spec.channels=1;spec.samples=512;
     SDL_AudioDeviceID audio=o.noAudio?0:SDL_OpenAudioDevice(nullptr,0,&spec,nullptr,0);
     if(!o.noAudio && !audio) throw std::runtime_error(std::string("Audio: ")+SDL_GetError());
@@ -381,6 +413,13 @@ int interactive(const Options& o) {
     while(running) {
         const auto now=SDL_GetTicks64()-start;
         controller.setSnapshot(engine.snapshot());controller.tick(now);
+        if(fb) {
+            fbKeys.clear();keyboard.poll(fbKeys);
+            for(const auto& k:fbKeys) {
+                SDL_Event e{};e.type=k.down?SDL_KEYDOWN:SDL_KEYUP;e.key.state=k.down?SDL_PRESSED:SDL_RELEASED;
+                e.key.repeat=k.repeat;e.key.keysym.sym=k.sym;SDL_PushEvent(&e);
+            }
+        }
         SDL_Event event;
         while(SDL_PollEvent(&event)) {
             if(event.type==SDL_QUIT) running=false;
@@ -412,6 +451,7 @@ int interactive(const Options& o) {
             controller.view.escHoldWarning=now-escDownMs>=400;
             if(now-escDownMs>=1500) running=false;
         }
+        if(fb && controller.view.dimmed!=backlightDimmed) {backlightDimmed=controller.view.dimmed;backlight.setDimmed(backlightDimmed);}
         if(volRepeat && now-lastVolRepeat>=130) {action(engine,controller.key(volRepeat));lastVolRepeat=now;}
         if(controller.sleepPausePending()) engine.pause(true);
         gain.setVolume(controller.saved.settings.volume);
@@ -439,10 +479,14 @@ int interactive(const Options& o) {
             controller.setSnapshot(snap);controller.tick(now);View v=controller.view;
             if(!controller.saved.settings.motion) v.timeMs=0;
             render(frame,v);for(int y=0;y<135;++y) frame.rowRgb565(y,pixels.data()+y*240);
-            // Simulate the LCD backlight relative to the normal preview palette.
-            const auto brightness=static_cast<std::uint8_t>(255u*controller.effectiveBrightness()/std::max(1u,unsigned(controller.saved.settings.brightness)));
-            SDL_SetTextureColorMod(texture,brightness,brightness,brightness);
-            SDL_UpdateTexture(texture,nullptr,pixels.data(),240*2);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);SDL_RenderPresent(renderer);lastDraw=now;
+            if(fb) panel.present(pixels.data(),240,135,o.fbFit);
+            else {
+                // Simulate the LCD backlight relative to the normal preview palette.
+                const auto brightness=static_cast<std::uint8_t>(255u*controller.effectiveBrightness()/std::max(1u,unsigned(controller.saved.settings.brightness)));
+                SDL_SetTextureColorMod(texture,brightness,brightness,brightness);
+                SDL_UpdateTexture(texture,nullptr,pixels.data(),240*2);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);SDL_RenderPresent(renderer);
+            }
+            lastDraw=now;
         }
         if(now-lastBattery>5000) {controller.view.batteryPercent=readBatteryPercent();lastBattery=now;}
         if(controller.dirty && !o.state.empty() && now-lastSave>2000) {controller.dirty=false;controller.storageResult(saveState(o.state,controller.saved));lastSave=now;}
@@ -451,7 +495,11 @@ int interactive(const Options& o) {
     }
     if(controller.dirty && !o.state.empty()) saveState(o.state,controller.saved);
     if(audio) SDL_CloseAudioDevice(audio);
-    SDL_DestroyTexture(texture);SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);SDL_Quit();return 0;
+    backlight.close();
+    if(texture) SDL_DestroyTexture(texture);
+    if(renderer) SDL_DestroyRenderer(renderer);
+    if(window) SDL_DestroyWindow(window);
+    SDL_Quit();return 0;
 #else
     (void)o; throw std::runtime_error("Built without SDL2. Use --wav/--shots, or install SDL2 and rebuild.");
 #endif

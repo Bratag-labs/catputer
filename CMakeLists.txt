@@ -24,6 +24,8 @@ find_package(SDL2 CONFIG QUIET)
 if(SDL2_FOUND)
   target_link_libraries(lofi_native PRIVATE SDL2::SDL2)
   target_compile_definitions(lofi_native PRIVATE LOFI_HAS_SDL=1)
+  # Framebuffer mode for the Cardputer Zero launcher (native/linux_fb.h).
+  target_sources(lofi_native PRIVATE native/linux_fb.cpp)
 else()
   message(STATUS "SDL2 unavailable: audio and screenshot export remain available")
 endif()
@@ -36,6 +38,14 @@ foreach(NAME music state controller storage ui output_gain timbre plate_reverb)
     add_test(NAME ${NAME} COMMAND test_${NAME})
   endif()
 endforeach()
+
+if(SDL2_FOUND)
+  add_executable(test_linux_fb tests/test_linux_fb.cpp native/linux_fb.cpp)
+  target_include_directories(test_linux_fb PRIVATE native)
+  target_link_libraries(test_linux_fb PRIVATE SDL2::SDL2)
+  target_compile_options(test_linux_fb PRIVATE -UNDEBUG)
+  add_test(NAME linux_fb COMMAND test_linux_fb)
+endif()
 
 # The browser build's C interface, run natively against the same engine.
 add_executable(test_web_api tests/test_web_api.cpp web/catputer_web.cpp)
