@@ -314,6 +314,10 @@ int readBatteryPercent() {
         std::ifstream type(entry.path()/"type");
         std::string kind;type>>kind;
         if(kind!="Battery") continue;
+        // Skip peripheral batteries (wireless mice, keyboards) reported as scope=Device.
+        std::ifstream scopeFile(entry.path()/"scope");
+        std::string scope;scopeFile>>scope;
+        if(scope=="Device") continue;
         std::ifstream capacity(entry.path()/"capacity");
         int value=0;
         if(capacity>>value) result=value;
@@ -372,6 +376,7 @@ int interactive(const Options& o) {
         if(s==SDLK_EQUALS || s==(SDLK_SCANCODE_MASK|SDL_SCANCODE_VOLUMEUP) || s==(SDLK_SCANCODE_MASK|SDL_SCANCODE_KP_9)) return char('=');
         return char{0};
     };
+    controller.view.batteryPercent=readBatteryPercent(); // Don't show "unknown" until the first 5 s poll.
     const auto start=SDL_GetTicks64();
     while(running) {
         const auto now=SDL_GetTicks64()-start;
@@ -389,14 +394,15 @@ int interactive(const Options& o) {
                 if(key==wakeKey) continue;
                 const char vk=volumeKey(event.key.keysym);
                 if(vk) key=vk=='-'?SDLK_MINUS:SDLK_EQUALS;
-                if(event.key.repeat && key!=SDLK_MINUS && key!=SDLK_EQUALS) continue;
+                // Volume keys repeat via volRepeat below; OS auto-repeat would double the rate.
+                if(event.key.repeat) continue;
                 if(key==SDLK_q && !controller.view.dimmed) {running=false;continue;}
-                if(key==SDLK_ESCAPE && !event.key.repeat) escDownMs=now;
+                if(key==SDLK_ESCAPE) escDownMs=now;
                 const bool wasDimmed=controller.view.dimmed;
                 if(key==SDLK_RETURN) key='\n';else if(key==SDLK_ESCAPE) key=27;else if(key==SDLK_BACKSPACE) key=127;
                 else if(key==SDLK_UP) key=';';else if(key==SDLK_DOWN) key='.';else if(key==SDLK_LEFT) key=',';else if(key==SDLK_RIGHT) key='/';
                 action(engine,controller.key(key));
-                if(vk && !wasDimmed && !event.key.repeat) {volRepeat=vk;lastVolRepeat=now;}
+                if(vk && !wasDimmed) {volRepeat=vk;lastVolRepeat=now;}
                 if(wasDimmed) wakeKey=event.key.keysym.sym;
             }
         }
