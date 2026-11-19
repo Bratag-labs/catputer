@@ -117,7 +117,7 @@ To keep your launcher and existing apps, use **M5Apps → Installer → SD** wit
 
 ## Build for Cardputer Zero
 
-The Zero runs Linux (aarch64) and runs the **native** build — the same `lofi_native` target as the desktop preview, not the ESP32 firmware. No PlatformIO, no flash write.
+The Zero runs Linux (aarch64) and runs the **native** build — the same `lofi_native` target as the desktop preview, not the ESP32 firmware. No PlatformIO, no flash write. Device-specific operational issues are covered in the [troubleshooting guide](docs/TROUBLESHOOTING.md).
 
 1. Copy the source to the device (any directory; `~/catputer` is used below):
 
