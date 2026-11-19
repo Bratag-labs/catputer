@@ -204,19 +204,20 @@ int main() {
     assert(std::memcmp(before.packed(), frame.packed(), Frame::packedBytes) == 0);
 
     // The hold-Escape exit warning draws a centered modal over the screen it
-    // appears on: gold border, dark fill, and the warning text.
+    // appears on: gold border, dark fill, and the warning text. Colour
+    // indices refer to ui.cpp's file-local palette enum: Ink = 0, Gold = 11.
     {
         View modal;
-        modal.motion = 0;
+        modal.motion = false;
         modal.escHoldWarning = true;
         Frame withWarning, plain;
         render(withWarning, modal);
-        assert(withWarning.get(36, 46) == Gold && withWarning.get(203, 89) == Gold);
-        assert(withWarning.get(120, 48) == Ink);
+        assert(withWarning.get(36, 46) == 11 && withWarning.get(203, 89) == 11);
+        assert(withWarning.get(120, 48) == 0);
         int goldText = 0;
         for (int y = 56; y <= 62; ++y) {
             for (int x = 37; x < 203; ++x) {
-                if (withWarning.get(x, y) == Gold) ++goldText;
+                if (withWarning.get(x, y) == 11) ++goldText;
             }
         }
         assert(goldText > 20);
