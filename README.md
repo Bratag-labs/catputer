@@ -115,6 +115,71 @@ To install standalone Catputer from desktop Chrome or Edge, use the [USB install
 
 To keep your launcher and existing apps, use **M5Apps → Installer → SD** with the application BIN. Follow the [installation guide](docs/INSTALL.md), including compatibility and SD details. Build/package commands never flash the device.
 
+## Build for Cardputer Zero
+
+The Zero runs Linux (aarch64) and runs the **native** build — the same `lofi_native` target as the desktop preview, not the ESP32 firmware. No PlatformIO, no flash write.
+
+1. Copy the source to the device (any directory; `~/catputer` is used below):
+
+   ```sh
+   rsync -a --exclude build ./ user@<zero-ip>:~/catputer
+   ```
+
+   (`git clone` on the device from any mirror of this code works too.)
+
+2. Install the build dependencies and configure on-device:
+
+   ```sh
+   sudo apt install build-essential cmake libsdl2-dev
+   cd ~/catputer
+   cmake -S . -B build/cmake -DCMAKE_BUILD_TYPE=Release
+   cmake --build build/cmake -j 2 --target lofi_native
+   ```
+
+   An incremental rebuild after a source change takes roughly 40 s.
+
+3. Test it from a terminal. `--state` is required for persistent settings and favorites; without it the app runs stateless and forgets everything on exit:
+
+   ```sh
+   ./build/cmake/lofi_native --state ~/.local/state.bin
+   ```
+
+### Installing into the launcher (APPLaunch)
+
+APPLaunch picks up any `.desktop` file in `/usr/share/APPLaunch/applications/`, with its icon in `/usr/share/APPLaunch/share/images/` — no TSV registration needed (`preinstalled-desktop-apps.tsv` is for factory preinstalls only).
+
+```sh
+sudo install -m 755 ~/catputer/build/cmake/lofi_native /usr/local/bin/lofi_native
+sudo strip /usr/local/bin/lofi_native
+sudo install -m 644 ~/catputer/assets/app-icon.png /usr/share/APPLaunch/share/images/catputer.png
+```
+
+Create `/usr/share/APPLaunch/applications/catputer.desktop` (replace `YOUR_USER` with the device account name; keep `--state`, otherwise the launcher starts a stateless instance):
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=Catputer
+Exec=/usr/local/bin/lofi_native --state /home/YOUR_USER/.local/state.bin
+Icon=share/images/catputer.png
+```
+
+The next time the launcher runs, **Catputer** appears with the app icon.
+
+### Updating after a code change
+
+```sh
+# from the development machine
+rsync -a --exclude build ./ user@<zero-ip>:~/catputer
+# on the device
+cmake --build ~/catputer/build/cmake -j 2 --target lofi_native
+sudo install -m 755 ~/catputer/build/cmake/lofi_native /usr/local/bin/lofi_native
+sudo strip /usr/local/bin/lofi_native
+pkill -x lofi_native
+```
+
+The physical volume keys work with no extra configuration (tap = one 5% step, hold = repeat). If the app is silent while the volume indicator is non-zero, see [Cardputer Zero: no audio](docs/TROUBLESHOOTING.md#cardputer-zero--no-audio).
+
 ## Samples, screenshots and site
 
 Python 3 is required for the tools; media export additionally needs Pillow (`python3 -m pip install -r tools/requirements-media.txt`). Audio demo export also requires FFmpeg with the libmp3lame encoder. `render_audio.py` renders both engines with matching parameters and records WAV/MP3 hashes for the site.
