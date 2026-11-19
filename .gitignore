@@ -20,3 +20,6 @@ assets/audio/raw/
 
 # Private binary state (native/device test fixtures)
 sdcard/LOFI/state.*
+
+# Session handoff notes
+SESSION_STATE.md

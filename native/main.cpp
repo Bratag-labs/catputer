@@ -305,6 +305,21 @@ void exportScreens(const Options& o) {
 void action(Engine& engine,const Action& a) {
     switch(a.kind) {case ActionKind::Config:engine.requestConfig(a.config);if(a.restartSession)engine.requestNext(a.config.seed);break;case ActionKind::Pause:engine.pause(a.paused);break;case ActionKind::Next:engine.requestNext();break;case ActionKind::None:break;}
 }
+// Linux exposes fuel gauges under /sys/class/power_supply (e.g. the
+// Cardputer Zero's BQ27220). Desktops without one keep the -1 "unknown" glyph.
+int readBatteryPercent() {
+    int result=-1;
+    std::error_code ec;
+    for(const auto& entry:fs::directory_iterator("/sys/class/power_supply",ec)) {
+        std::ifstream type(entry.path()/"type");
+        std::string kind;type>>kind;
+        if(kind!="Battery") continue;
+        std::ifstream capacity(entry.path()/"capacity");
+        int value=0;
+        if(capacity>>value) result=value;
+    }
+    return result;
+}
 int interactive(const Options& o) {
 #ifdef LOFI_HAS_SDL
     if(SDL_Init(SDL_INIT_VIDEO|(o.noAudio?0:SDL_INIT_AUDIO))!=0) throw std::runtime_error(SDL_GetError());
@@ -343,8 +358,20 @@ int interactive(const Options& o) {
     OutputGain gain(controller.saved.settings.volume);
     Engine engine(cfg); Frame frame; std::array<std::int16_t,512> pcm{}; std::array<std::uint16_t,240*135> pixels{};
     if(audio) SDL_PauseAudioDevice(audio,0);
-    bool running=true;std::uint64_t lastDraw=0,lastSave=0,silentProduced=0;
+    bool running=true;std::uint64_t lastDraw=0,lastSave=0,lastBattery=0,silentProduced=0;
+    std::uint64_t escDownMs=0; // Holding Escape quits; a tap stays "back".
+    char volRepeat=0;std::uint64_t lastVolRepeat=0; // Held volume key steps every 130 ms, matching the firmware.
     SDL_Keycode wakeKey=SDLK_UNKNOWN;
+    // Volume key as a char, or 0. The Cardputer Zero reports its volume keys
+    // without a layout symbol: the hardware buttons arrive as masked
+    // VOLUMEUP/VOLUMEDOWN scancodes and the SYMB layer's minus/equals as masked
+    // KP_7/KP_9 (measured on device in the 2026-11-18 key capture).
+    auto volumeKey=[&](const SDL_Keysym& ks){
+        const SDL_Keycode s=static_cast<SDL_Keycode>(ks.sym);
+        if(s==SDLK_MINUS || s==(SDLK_SCANCODE_MASK|SDL_SCANCODE_VOLUMEDOWN) || s==(SDLK_SCANCODE_MASK|SDL_SCANCODE_KP_7)) return char('-');
+        if(s==SDLK_EQUALS || s==(SDLK_SCANCODE_MASK|SDL_SCANCODE_VOLUMEUP) || s==(SDLK_SCANCODE_MASK|SDL_SCANCODE_KP_9)) return char('=');
+        return char{0};
+    };
     const auto start=SDL_GetTicks64();
     while(running) {
         const auto now=SDL_GetTicks64()-start;
@@ -352,19 +379,29 @@ int interactive(const Options& o) {
         SDL_Event event;
         while(SDL_PollEvent(&event)) {
             if(event.type==SDL_QUIT) running=false;
-            if(event.type==SDL_KEYUP && event.key.keysym.sym==wakeKey) wakeKey=SDLK_UNKNOWN;
+            if(event.type==SDL_KEYUP) {
+                if(event.key.keysym.sym==wakeKey) wakeKey=SDLK_UNKNOWN;
+                if(event.key.keysym.sym==SDLK_ESCAPE) escDownMs=0;
+                if(volRepeat && volumeKey(event.key.keysym)==volRepeat) volRepeat=0;
+            }
             if(event.type==SDL_KEYDOWN) {
                 int key=event.key.keysym.sym;
                 if(key==wakeKey) continue;
+                const char vk=volumeKey(event.key.keysym);
+                if(vk) key=vk=='-'?SDLK_MINUS:SDLK_EQUALS;
                 if(event.key.repeat && key!=SDLK_MINUS && key!=SDLK_EQUALS) continue;
                 if(key==SDLK_q && !controller.view.dimmed) {running=false;continue;}
+                if(key==SDLK_ESCAPE && !event.key.repeat) escDownMs=now;
                 const bool wasDimmed=controller.view.dimmed;
                 if(key==SDLK_RETURN) key='\n';else if(key==SDLK_ESCAPE) key=27;else if(key==SDLK_BACKSPACE) key=127;
                 else if(key==SDLK_UP) key=';';else if(key==SDLK_DOWN) key='.';else if(key==SDLK_LEFT) key=',';else if(key==SDLK_RIGHT) key='/';
                 action(engine,controller.key(key));
+                if(vk && !wasDimmed && !event.key.repeat) {volRepeat=vk;lastVolRepeat=now;}
                 if(wasDimmed) wakeKey=event.key.keysym.sym;
             }
         }
+        if(escDownMs && now-escDownMs>=1500) running=false;
+        if(volRepeat && now-lastVolRepeat>=130) {action(engine,controller.key(volRepeat));lastVolRepeat=now;}
         if(controller.sleepPausePending()) engine.pause(true);
         gain.setVolume(controller.saved.settings.volume);
         gain.setSleepGain(controller.sleepGainQ15());
@@ -396,6 +433,7 @@ int interactive(const Options& o) {
             SDL_SetTextureColorMod(texture,brightness,brightness,brightness);
             SDL_UpdateTexture(texture,nullptr,pixels.data(),240*2);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);SDL_RenderPresent(renderer);lastDraw=now;
         }
+        if(now-lastBattery>5000) {controller.view.batteryPercent=readBatteryPercent();lastBattery=now;}
         if(controller.dirty && !o.state.empty() && now-lastSave>2000) {controller.dirty=false;controller.storageResult(saveState(o.state,controller.saved));lastSave=now;}
         if(o.smokeMs && now>=o.smokeMs) running=false;
         SDL_Delay(2);
