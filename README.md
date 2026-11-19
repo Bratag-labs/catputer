@@ -154,13 +154,13 @@ sudo strip /usr/local/bin/lofi_native
 sudo install -m 644 ~/catputer/assets/app-icon.png /usr/share/APPLaunch/share/images/catputer.png
 ```
 
-Create `/usr/share/APPLaunch/applications/catputer.desktop` (replace `YOUR_USER` with the device account name; keep `--state`, otherwise the launcher starts a stateless instance):
+Create `/usr/share/APPLaunch/applications/catputer.desktop` (replace `YOUR_USER` with the device account name; keep `--state`, otherwise the launcher starts a stateless instance, and keep `--fb`: the launcher has no display server for an SDL window, so the app draws straight to the panel, takes the keyboard while in front and dims the real backlight):
 
 ```ini
 [Desktop Entry]
 Type=Application
 Name=Catputer
-Exec=/usr/local/bin/lofi_native --state /home/YOUR_USER/.local/state.bin
+Exec=/usr/local/bin/lofi_native --fb --state /home/YOUR_USER/.local/state.bin
 Icon=share/images/catputer.png
 ```
 
