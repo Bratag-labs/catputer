@@ -7,6 +7,7 @@
 #include "storage.h"
 #ifdef LOFI_HAS_SDL
 #include "linux_fb.h"
+#include "out_resampler.h"
 #endif
 #include <algorithm>
 #include <array>
@@ -368,7 +369,10 @@ int interactive(const Options& o) {
         if(!texture) throw std::runtime_error(SDL_GetError());
     }
     std::vector<lofi_fb::KeyEvent> fbKeys;bool backlightDimmed=false;
-    SDL_AudioSpec spec{};spec.freq=kMusicSampleRate;spec.format=AUDIO_S16SYS;spec.channels=1;spec.samples=512;
+    // Output at 48 kHz (the sink's native rate) and resample from the 32 kHz
+    // music core: the Zero's pipewire-pulse 32k client path glitches (see
+    // out_resampler.h).
+    SDL_AudioSpec spec{};spec.freq=OutputResampler::kOutRate;spec.format=AUDIO_S16SYS;spec.channels=1;spec.samples=OutputResampler::kOutBlock;
     SDL_AudioDeviceID audio=o.noAudio?0:SDL_OpenAudioDevice(nullptr,0,&spec,nullptr,0);
     if(!o.noAudio && !audio) throw std::runtime_error(std::string("Audio: ")+SDL_GetError());
     Controller controller(o.config.seed);
@@ -392,7 +396,7 @@ int interactive(const Options& o) {
     controller.saved.settings.leadTone=cfg.leadTone;controller.saved.settings.bassTone=cfg.bassTone;
     if(o.volumeExplicit) controller.saved.settings.volume=o.volume;
     OutputGain gain(controller.saved.settings.volume);
-    Engine engine(cfg); Frame frame; std::array<std::int16_t,512> pcm{}; std::array<std::uint16_t,240*135> pixels{};
+    Engine engine(cfg); Frame frame; std::array<std::int16_t,512> pcm{}; std::array<std::int16_t,OutputResampler::kOutBlock> outPcm{}; OutputResampler resampler; std::array<std::uint16_t,240*135> pixels{};
     if(audio) SDL_PauseAudioDevice(audio,0);
     bool running=true;std::uint64_t lastDraw=0,lastSave=0,lastBattery=0,silentProduced=0;
     std::uint64_t escDownMs=0; // Holding Escape quits; a tap stays "back".
@@ -457,10 +461,10 @@ int interactive(const Options& o) {
         gain.setVolume(controller.saved.settings.volume);
         gain.setSleepGain(controller.sleepGainQ15());
         unsigned produced=0;
-        while(produced<6 && ((audio && SDL_GetQueuedAudioSize(audio)<6144) || (!audio && silentProduced<now*kMusicSampleRate/1000))) {
+        while(produced<6 && ((audio && SDL_GetQueuedAudioSize(audio)<11520) || (!audio && silentProduced<now*kMusicSampleRate/1000))) {
             engine.render(pcm.data(),pcm.size());
             gain.process(pcm.data(),pcm.size());
-            if(audio && SDL_QueueAudio(audio,pcm.data(),pcm.size()*2)!=0) throw std::runtime_error(SDL_GetError());
+            if(audio && SDL_QueueAudio(audio,outPcm.data(),resampler.process(pcm.data(),outPcm.data())*2)!=0) throw std::runtime_error(SDL_GetError());
             silentProduced+=pcm.size();++produced;
         }
         const unsigned interval=controller.saved.settings.motion==2?83:controller.saved.settings.motion==1?166:250;
@@ -471,7 +475,7 @@ int interactive(const Options& o) {
             if(audio) {
                 const auto queuedFrames=SDL_GetQueuedAudioSize(audio)/sizeof(std::int16_t);
                 const auto phaseOffset=(std::uint64_t(queuedFrames)*snap.bpm*65536u)/
-                    (std::uint64_t(kMusicSampleRate)*60u*snap.beatsPerBar);
+                    (std::uint64_t(OutputResampler::kOutRate)*60u*snap.beatsPerBar);
                 snap.barPhaseQ16=static_cast<std::uint16_t>(snap.barPhaseQ16-phaseOffset);
                 snap.sixteenth=static_cast<std::uint8_t>((std::uint32_t(snap.barPhaseQ16)*snap.stepsPerBar)/65536u);
                 snap.beat=static_cast<std::uint8_t>(snap.sixteenth/snap.stepsPerBeat);

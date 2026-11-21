@@ -39,6 +39,12 @@ foreach(NAME music state controller storage ui output_gain timbre plate_reverb)
   endif()
 endforeach()
 
+# Native-only 32k -> 48k output resampler (native/out_resampler.h).
+add_executable(test_out_resampler tests/test_out_resampler.cpp)
+target_include_directories(test_out_resampler PRIVATE native)
+target_compile_options(test_out_resampler PRIVATE -UNDEBUG)
+add_test(NAME out_resampler COMMAND test_out_resampler)
+
 if(SDL2_FOUND)
   add_executable(test_linux_fb tests/test_linux_fb.cpp native/linux_fb.cpp)
   target_include_directories(test_linux_fb PRIVATE native)
