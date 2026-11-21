@@ -41,7 +41,7 @@ DESKTOP_TEMPLATE = """\
 [Desktop Entry]
 Type=Application
 Name=Catputer
-Exec=/usr/local/bin/lofi_native --fb --state @STATE@
+Exec=/usr/local/bin/lofi_native --fb --hp 75 --state @STATE@
 Icon=share/images/catputer.png
 """
 

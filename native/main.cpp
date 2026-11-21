@@ -6,6 +6,7 @@
 #include "lofi/ui.h"
 #include "storage.h"
 #ifdef LOFI_HAS_SDL
+#include "high_pass.h"
 #include "linux_fb.h"
 #include "out_resampler.h"
 #endif
@@ -35,6 +36,7 @@ struct Options {
     double seconds=90;
     fs::path wav,meta,score,shots,animation,state;
     unsigned frames=48, smokeMs=0, volume=100;
+    double hp=0; // High-pass for the preview output in Hz; 0 = off.
     enum class Display {Auto,Window,Fb} display=Display::Auto;
     bool fbFit=true;
     bool noAudio=false, moodExplicit=false, engineExplicit=false, bpmExplicit=false, volumeExplicit=false;
@@ -81,6 +83,7 @@ Options options(int argc,char** argv) {
         else if(a=="--lead") {o.config.leadTone=parseTone(value());o.leadExplicit=true;}
         else if(a=="--bass") {o.config.bassTone=parseBass(value());o.bassExplicit=true;}
         else if(a=="--volume") { auto n=number(value()); if(n>OutputGain::kMaxPercent) throw std::runtime_error("Volume: 0..300 percent"); o.volume=static_cast<unsigned>(n);o.volumeExplicit=true; }
+        else if(a=="--hp") { auto s=value(); std::size_t pos=0; auto v=std::stod(s,&pos); if(pos!=s.size() || !std::isfinite(v) || v<20 || v>2000) throw std::runtime_error("High-pass must be 20..2000 Hz"); o.hp=v; }
         else if(a=="--seconds") { auto s=value(); std::size_t pos=0; o.seconds=std::stod(s,&pos); if(pos!=s.size() || !std::isfinite(o.seconds) || o.seconds<=0 || o.seconds>7200) throw std::runtime_error("Seconds must be in (0,7200]"); }
         else if(a=="--frames") { auto n=number(value()); if(n<1 || n>720) throw std::runtime_error("Frames must be 1..720"); o.frames=static_cast<unsigned>(n); }
         else if(a=="--engine") { o.engineExplicit=true; auto v=value(); if(v=="synth") o.config.soundEngine=SoundEngine::Synth; else if(v=="hybrid") o.config.soundEngine=SoundEngine::Hybrid; else throw std::runtime_error("Engine: synth or hybrid"); }
@@ -96,6 +99,7 @@ Options options(int argc,char** argv) {
                 <<"  --score FILE   Export scheduled notes/harmony as CSV for --seconds\n"
                 <<"  --engine synth|hybrid --mood cozy|rainy|night|sunny --seed INTEGER\n"
                 <<"  --bpm auto|40..180 --volume 0..300  Playback/WAV output settings\n"
+                <<"  --hp HZ        High-pass the preview output at HZ (20..2000; 75 tames the Zero speaker)\n"
                 <<"  --meter auto|4/4|3/4|6/8  6/8 BPM counts dotted-quarter pulses\n"
                 <<"  --keys/--lead epiano|felt|nylon|vibes|pad|flute\n"
                 <<"  --bass round|upright|sub\n"
@@ -396,7 +400,7 @@ int interactive(const Options& o) {
     controller.saved.settings.leadTone=cfg.leadTone;controller.saved.settings.bassTone=cfg.bassTone;
     if(o.volumeExplicit) controller.saved.settings.volume=o.volume;
     OutputGain gain(controller.saved.settings.volume);
-    Engine engine(cfg); Frame frame; std::array<std::int16_t,512> pcm{}; std::array<std::int16_t,OutputResampler::kOutBlock> outPcm{}; OutputResampler resampler; std::array<std::uint16_t,240*135> pixels{};
+    Engine engine(cfg); Frame frame; std::array<std::int16_t,512> pcm{}; std::array<std::int16_t,OutputResampler::kOutBlock> outPcm{}; OutputResampler resampler; HighPass highpass(o.hp, static_cast<double>(OutputResampler::kOutRate)); std::array<std::uint16_t,240*135> pixels{};
     if(audio) SDL_PauseAudioDevice(audio,0);
     bool running=true;std::uint64_t lastDraw=0,lastSave=0,lastBattery=0,silentProduced=0;
     std::uint64_t escDownMs=0; // Holding Escape quits; a tap stays "back".
@@ -464,7 +468,9 @@ int interactive(const Options& o) {
         while(produced<6 && ((audio && SDL_GetQueuedAudioSize(audio)<11520) || (!audio && silentProduced<now*kMusicSampleRate/1000))) {
             engine.render(pcm.data(),pcm.size());
             gain.process(pcm.data(),pcm.size());
-            if(audio && SDL_QueueAudio(audio,outPcm.data(),resampler.process(pcm.data(),outPcm.data())*2)!=0) throw std::runtime_error(SDL_GetError());
+            const auto rendered=resampler.process(pcm.data(),outPcm.data());
+            if(o.hp>0) highpass.process(outPcm.data(),rendered);
+            if(audio && SDL_QueueAudio(audio,outPcm.data(),rendered*2)!=0) throw std::runtime_error(SDL_GetError());
             silentProduced+=pcm.size();++produced;
         }
         const unsigned interval=controller.saved.settings.motion==2?83:controller.saved.settings.motion==1?166:250;

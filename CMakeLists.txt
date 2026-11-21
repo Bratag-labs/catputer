@@ -45,6 +45,12 @@ target_include_directories(test_out_resampler PRIVATE native)
 target_compile_options(test_out_resampler PRIVATE -UNDEBUG)
 add_test(NAME out_resampler COMMAND test_out_resampler)
 
+# Native-only 48 kHz output high-pass (native/high_pass.h), Zero speaker.
+add_executable(test_high_pass tests/test_high_pass.cpp)
+target_include_directories(test_high_pass PRIVATE native)
+target_compile_options(test_high_pass PRIVATE -UNDEBUG)
+add_test(NAME high_pass COMMAND test_high_pass)
+
 if(SDL2_FOUND)
   add_executable(test_linux_fb tests/test_linux_fb.cpp native/linux_fb.cpp)
   target_include_directories(test_linux_fb PRIVATE native)
