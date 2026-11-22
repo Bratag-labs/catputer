@@ -1,10 +1,15 @@
 // 48 kHz preview output high-pass for the Cardputer Zero's built-in speaker.
 //
-// The speaker's cone has a few millimetres of usable travel; bass energy
-// below its ~80-120 Hz resonance is barely audible on it but still drives
-// the cone, and past the travel limit the driver rattles (user-confirmed
-// crackle on bass, headphones clean, 2026-11-21). A gentle 2nd-order
-// Butterworth high-pass removes the excursion demand below the cutoff.
+// Bass below the small speaker's ~80-120 Hz resonance is barely audible on
+// it but still drives the cone and eats amplifier headroom. A gentle
+// 2nd-order Butterworth high-pass removes that demand below the cutoff;
+// the launcher runs it at 75 Hz.
+//
+// Most of the crackle reported on 2026-11-21 was NOT the speaker: the
+// ES8389 DAC volume was +12.5 dB (amixer value 216), so the codec clipped
+// from ~10 % FS at every frequency. Fixed in the device mixer (0 dB, value
+// 191), see docs/TROUBLESHOOTING.md#cardputer-zero-speaker-crackle-or-distortion.
+// This filter is the remaining speaker-side insurance.
 //
 // Second-order Butterworth biquad (Q = 1/sqrt(2)): -3 dB at the cutoff,
 // 12 dB/octave below it. Streaming: the two pole/zero state pairs persist

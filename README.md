@@ -189,7 +189,7 @@ sudo dpkg -i build/deb/catputer_<version>_arm64.deb
 
 On the device, run it after the `cmake` build; on a development host without an aarch64 toolchain, `tools/build_release_deb.sh` does the whole job — it builds `lofi_native` in an arm64 Debian container (docker + qemu), runs the test suite there, and packages the result. Both paths use `dpkg-deb` when available with a built-in pure-Python assembler as fallback, and refuse to package a binary whose ELF machine does not match `--arch`. The package installs `/usr/local/bin/lofi_native` (stripped) and the APPLaunch icon and template; `postinst` generates `catputer.desktop` with `--state` pointing at the installing user's `~/.local/state.bin` (so one package serves any account), `preinst` stops a running instance before upgrading the binary, and `postrm` kills the app and removes the launcher entry on uninstall. Rebuild and `dpkg -i` again to upgrade.
 
-The physical volume keys work with no extra configuration (tap = one 5% step, hold = repeat). If the app is silent while the volume indicator is non-zero, see [Cardputer Zero: no audio](docs/TROUBLESHOOTING.md#cardputer-zero--no-audio).
+The physical volume keys work with no extra configuration (tap = one 5% step, hold = repeat). If the app is silent while the volume indicator is non-zero, see [Cardputer Zero: no audio](docs/TROUBLESHOOTING.md#cardputer-zero--no-audio). If the speaker crackles or distorts, see [Cardputer Zero: speaker crackle](docs/TROUBLESHOOTING.md#cardputer-zero-speaker-crackle-or-distortion).
 
 ## Samples, screenshots and site
 
