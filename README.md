@@ -119,6 +119,32 @@ To keep your launcher and existing apps, use **M5Apps → Installer → SD** wit
 
 The Zero runs Linux (aarch64) and runs the **native** build — the same `lofi_native` target as the desktop preview, not the ESP32 firmware. No PlatformIO, no flash write. Device-specific operational issues are covered in the [troubleshooting guide](docs/TROUBLESHOOTING.md).
 
+### Prebuilt package (0.1.14-dev)
+
+The current Zero build is published as a Debian package on the [Bratag-labs/catputer v0.1.14-dev release](https://github.com/Bratag-labs/catputer/releases/tag/v0.1.14-dev). On the device:
+
+```sh
+wget https://github.com/Bratag-labs/catputer/releases/download/v0.1.14-dev/catputer_0.1.14-dev_arm64.deb
+sudo dpkg -i catputer_0.1.14-dev_arm64.deb
+```
+
+It installs the app and its launcher entry (details under [Packaging as a .deb](#packaging-as-a-deb)). Do the one-time [audio setup](#audio-setup-one-time) below as well. 0.1.14-dev routes the Zero's audio through an in-process 32 kHz → 48 kHz resampler (the PipeWire 32 kHz client path glitched) and runs a 75 Hz high-pass on the speaker output (`--hp 75` in the launcher entry).
+
+### Audio setup (one-time)
+
+The ES8389 codec's DAC volume is a digital gain where **191 = 0 dB**. On our Zero it was stored at 216 (+12.5 dB), which made the codec clip from about 10 % of full scale and the speaker crackle and distort, worst on bass and at high volume. Check it and set it to 0 dB:
+
+```sh
+amixer -c 1 cget name='DACL Playback Volume'      # 191 is correct
+amixer -c 1 cset name='DACL Playback Volume' 191
+amixer -c 1 cset name='DACR Playback Volume' 191
+sudo alsactl store 1                              # keep it across reboots
+```
+
+The same controls appear in `alsamixer -c 1` as *DACL/DACR Playback* (set both to 0 dB). This affects all audio on the device; peak loudness barely changes, because the extra gain was turning into clipping rather than volume. `wpctl` does not show this control: the PipeWire sink can read 100 % / 0 dB while the DAC is still boosted. Background and the measurements are in [Cardputer Zero: speaker crackle](docs/TROUBLESHOOTING.md#cardputer-zero-speaker-crackle-or-distortion).
+
+### Building on the device
+
 1. Copy the source to the device (any directory; `~/catputer` is used below):
 
    ```sh
@@ -154,13 +180,13 @@ sudo strip /usr/local/bin/lofi_native
 sudo install -m 644 ~/catputer/assets/app-icon.png /usr/share/APPLaunch/share/images/catputer.png
 ```
 
-Create `/usr/share/APPLaunch/applications/catputer.desktop` (replace `YOUR_USER` with the device account name; keep `--state`, otherwise the launcher starts a stateless instance, and keep `--fb`: the launcher has no display server for an SDL window, so the app draws straight to the panel, takes the keyboard while in front and dims the real backlight):
+Create `/usr/share/APPLaunch/applications/catputer.desktop` (replace `YOUR_USER` with the device account name; keep `--state`, otherwise the launcher starts a stateless instance, and keep `--fb`: the launcher has no display server for an SDL window, so the app draws straight to the panel, takes the keyboard while in front and dims the real backlight; `--hp 75` high-passes the output at 75 Hz, bass the small speaker cannot reproduce but would still spend amplifier headroom on):
 
 ```ini
 [Desktop Entry]
 Type=Application
 Name=Catputer
-Exec=/usr/local/bin/lofi_native --fb --state /home/YOUR_USER/.local/state.bin
+Exec=/usr/local/bin/lofi_native --fb --hp 75 --state /home/YOUR_USER/.local/state.bin
 Icon=share/images/catputer.png
 ```
 
